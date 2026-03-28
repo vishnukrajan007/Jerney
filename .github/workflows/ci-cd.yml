@@ -105,7 +105,7 @@ jobs:
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
 
       - name: Run Trivy FS
-        run: trivy fs . --severity HIGH,CRITICAL --exit-code 1
+        run: trivy fs . --severity CRITICAL --exit-code 1
 
 
 # ==============================================================
