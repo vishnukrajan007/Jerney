@@ -17,7 +17,7 @@ env:
 jobs:
 
 # ==============================================================
-# 1. LINT   
+# 1. LINT
 # ==============================================================
   lint:
     name: "🔍 Lint Code"
@@ -45,7 +45,7 @@ jobs:
 
 
 # ==============================================================
-# 2. SCA ..
+# 2. SCA
 # ==============================================================
   sca:
     name: "🛡️ Dependency Scan"
@@ -87,7 +87,7 @@ jobs:
       - name: Run Gitleaks
         uses: zricethezav/gitleaks-action@v2
         with:
-        upload_sarif: false
+          upload_sarif: false
 
 
 # ==============================================================
@@ -252,6 +252,6 @@ jobs:
       - name: Tag & Push
         run: |
           docker tag ${{ matrix.component }}:latest \
-          ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
+            ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
 
           docker push ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
