@@ -13,8 +13,6 @@ env:
   DOCKER_REGISTRY: docker.io
   DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USER }}
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-  BACKEND_IMAGE: ${{ secrets.DOCKERHUB_USER }}/jerney-backend
-  FRONTEND_IMAGE: ${{ secrets.DOCKERHUB_USER }}/jerney-frontend
 
 jobs:
 
@@ -36,15 +34,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
 
       - name: Install dependencies
         working-directory: ${{ matrix.component }}
-        run: npm ci
+        run: npm install
 
       - name: Run ESLint
         working-directory: ${{ matrix.component }}
         run: npm run lint
+
 
 # ==============================================================
 # 2. SCA
@@ -68,11 +66,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: ${{ matrix.component }}
-        run: npm ci
+        run: npm install
 
       - name: Run npm audit
         working-directory: ${{ matrix.component }}
         run: npm audit --audit-level=high || true
+
 
 # ==============================================================
 # 3. GITLEAKS
@@ -87,6 +86,7 @@ jobs:
 
       - name: Run Gitleaks
         uses: zricethezav/gitleaks-action@v2
+
 
 # ==============================================================
 # 4. TRIVY FS
@@ -109,6 +109,7 @@ jobs:
       - name: Run Trivy FS
         run: trivy fs . --severity HIGH,CRITICAL --exit-code 1
 
+
 # ==============================================================
 # 5. SONARQUBE
 # ==============================================================
@@ -126,15 +127,17 @@ jobs:
           node-version: "20"
 
       - name: Install dependencies
-        run: npm ci
+        working-directory: backend
+        run: npm install
 
       - name: Run SonarQube Scan
         run: |
           npx sonar-scanner \
-            -Dsonar.projectKey=my-app \
-            -Dsonar.sources=. \
+            -Dsonar.projectKey=jerney \
+            -Dsonar.sources=backend \
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+
 
 # ==============================================================
 # 6. NEXUS
@@ -153,13 +156,15 @@ jobs:
           node-version: "20"
 
       - name: Install dependencies
-        run: npm ci
+        working-directory: backend
+        run: npm install
 
       - name: Build project
+        working-directory: backend
         run: npm run build
 
       - name: Create artifact
-        run: zip -r app.zip .
+        run: zip -r app.zip backend
 
       - name: Upload to Nexus
         run: |
@@ -167,8 +172,9 @@ jobs:
           --upload-file app.zip \
           http://52.66.101.194:8081/repository/my-artifacts/app.zip
 
+
 # ==============================================================
-# 7. BUILD
+# 7. BUILD DOCKER IMAGES
 # ==============================================================
   build:
     name: "🐳 Build Images"
@@ -193,8 +199,9 @@ jobs:
           name: image-${{ matrix.component }}
           path: ${{ matrix.component }}.tar
 
+
 # ==============================================================
-# 8. TRIVY IMAGE
+# 8. TRIVY IMAGE SCAN
 # ==============================================================
   trivy-image:
     name: "🔬 Image Scan"
@@ -206,8 +213,6 @@ jobs:
         component: [backend, frontend]
 
     steps:
-      - uses: actions/checkout@v4
-
       - uses: actions/download-artifact@v4
         with:
           name: image-${{ matrix.component }}
@@ -228,8 +233,9 @@ jobs:
             --severity HIGH,CRITICAL \
             --exit-code 1
 
+
 # ==============================================================
-# 9. PUSH
+# 9. PUSH TO DOCKER HUB
 # ==============================================================
   push:
     name: "🚀 Push to Docker Hub"
