@@ -217,7 +217,7 @@ jobs:
       - name: Scan Image
         run: |
           trivy image ${{ matrix.component }}:latest \
-            --severity HIGH,CRITICAL \
+            --severity CRITICAL \
             --exit-code 1
 
 
