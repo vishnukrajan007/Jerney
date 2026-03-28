@@ -86,6 +86,8 @@ jobs:
 
       - name: Run Gitleaks
         uses: zricethezav/gitleaks-action@v2
+        with:
+        upload_sarif: false
 
 
 # ==============================================================
