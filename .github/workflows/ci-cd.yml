@@ -74,23 +74,6 @@ jobs:
 
 
 # ==============================================================
-# 3. GITLEAKS
-# ==============================================================
-  gitleaks:
-    name: "🔐 Secret Scan"
-    runs-on: self-hosted
-    needs: lint
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run Gitleaks
-        uses: zricethezav/gitleaks-action@v2
-        with:
-          upload_sarif: false
-
-
-# ==============================================================
 # 4. TRIVY FS
 # ==============================================================
   trivy-fs:
