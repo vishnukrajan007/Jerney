@@ -6,7 +6,7 @@ RUN npm install --legacy-peer-deps && npm cache clean --force
 COPY . .
 RUN npm run build
 
-# ---- Production stage ----
+# ---- Production stage ---- -
 FROM nginx:stable-alpine AS production
 
 # Security: remove default nginx config
