@@ -5,7 +5,7 @@ COPY package.json package-lock.json* ./
 RUN npm install --only=production && npm cache clean --force
 
 # ---- Production stage ----
-FROM node:20-alpine AS production
+FROM node:20-alpine3.22 AS production
 
 # Security: run as non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
