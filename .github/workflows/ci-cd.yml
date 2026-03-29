@@ -21,7 +21,7 @@ jobs:
 # ==============================================================
   lint:
     name: "🔍 Lint Code"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     strategy:
       matrix:
@@ -49,7 +49,7 @@ jobs:
 # ==============================================================
   sca:
     name: "🛡️ Dependency Scan"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: lint
 
     strategy:
@@ -93,7 +93,7 @@ jobs:
 # ==============================================================
   trivy-fs:
     name: "🔬 File Scan"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: gitleaks
 
     steps:
@@ -113,7 +113,7 @@ jobs:
 # ==============================================================
   sonarqube:
     name: "🔵 SonarQube Analysis"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: trivy-fs
 
     steps:
@@ -142,7 +142,7 @@ jobs:
 # ==============================================================
   nexus:
     name: "📦 Upload Artifact to Nexus"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: sonarqube
 
     steps:
@@ -167,7 +167,7 @@ jobs:
 # ==============================================================
   build:
     name: "🐳 Build Images"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: nexus
 
     strategy:
@@ -194,7 +194,7 @@ jobs:
 # ==============================================================
   trivy-image:
     name: "🔬 Image Scan"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build
 
     strategy:
@@ -226,7 +226,7 @@ jobs:
 # ==============================================================
   push:
     name: "🚀 Push to Docker Hub"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: trivy-image
 
     strategy:
