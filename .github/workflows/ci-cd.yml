@@ -3,21 +3,25 @@ name: Jerney DevSecOps Pipeline
 on:
   push:
     branches: ["*"]
+  pull_request:
+    branches: ["*"]
 
 permissions:
-  contents: write
+  contents: read
 
 env:
+  DOCKER_REGISTRY: docker.io
   DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USER }}
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
 jobs:
 
   # ==============================================================
-  # 1. BUILD
+  # 1. LINT
   # ==============================================================
-  build:
-    runs-on: self-hosted
+  lint:
+    name: "🔍 Lint Code"
+    runs-on: ubuntu-latest
 
     strategy:
       matrix:
@@ -26,7 +30,154 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Image
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.component }}
+        run: npm install
+
+      - name: Run ESLint
+        working-directory: ${{ matrix.component }}
+        run: npm run lint
+
+
+  # ==============================================================
+  # 2. SCA
+  # ==============================================================
+  sca:
+    name: "🛡️ Dependency Scan"
+    runs-on: ubuntu-latest
+    needs: lint
+
+    strategy:
+      matrix:
+        component: [backend, frontend]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.component }}
+        run: npm install
+
+      - name: Run npm audit
+        working-directory: ${{ matrix.component }}
+        run: npm audit --audit-level=high || true
+
+
+  # ==============================================================
+  # 3. GITLEAKS
+  # ==============================================================
+  gitleaks:
+    name: "🔐 Secret Scan"
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Gitleaks
+        uses: zricethezav/gitleaks-action@v2
+
+
+  # ==============================================================
+  # 4. TRIVY FS
+  # ==============================================================
+  trivy-fs:
+    name: "🔬 File Scan"
+    runs-on: ubuntu-latest
+    needs: gitleaks
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
+
+      - name: Run Trivy FS
+        run: trivy fs . --severity CRITICAL --exit-code 1
+
+
+  # ==============================================================
+  # 5. SONARQUBE
+  # ==============================================================
+  sonarqube:
+    name: "🔵 SonarQube Analysis"
+    runs-on: ubuntu-latest
+    needs: trivy-fs
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm install
+
+      - name: Run SonarQube Scan
+        run: |
+          npx sonar-scanner \
+            -Dsonar.projectKey=jerney \
+            -Dsonar.sources=backend \
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+
+
+  # ==============================================================
+  # 6. NEXUS
+  # ==============================================================
+  nexus:
+    name: "📦 Upload Artifact to Nexus"
+    runs-on: ubuntu-latest
+    needs: sonarqube
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm install
+
+      - name: Create artifact
+        run: zip -r app.zip backend
+
+      - name: Upload to Nexus
+        run: |
+          curl -u ${{ secrets.NEXUS_USER }}:${{ secrets.NEXUS_PASS }} \
+          --upload-file app.zip \
+          http://43.205.126.242:8081/repository/my-artifacts-raw/app.zip
+
+
+  # ==============================================================
+  # 7. BUILD DOCKER IMAGES
+  # ==============================================================
+  build:
+    name: "🐳 Build Images"
+    runs-on: ubuntu-latest
+    needs: nexus
+
+    strategy:
+      matrix:
+        component: [backend, frontend]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker Image
         run: docker build -t ${{ matrix.component }}:latest ./${{ matrix.component }}
 
       - name: Save Image
@@ -39,10 +190,11 @@ jobs:
 
 
   # ==============================================================
-  # 2. PUSH DOCKER
+  # 8. TRIVY IMAGE SCAN
   # ==============================================================
-  push:
-    runs-on: self-hosted
+  trivy-image:
+    name: "🔬 Image Scan"
+    runs-on: ubuntu-latest
     needs: build
 
     strategy:
@@ -54,9 +206,43 @@ jobs:
         with:
           name: image-${{ matrix.component }}
 
-      - run: docker load -i ${{ matrix.component }}.tar
+      - name: Load Image
+        run: docker load -i ${{ matrix.component }}.tar
 
-      - uses: docker/login-action@v3
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
+
+      - name: Scan Image
+        run: |
+          trivy image ${{ matrix.component }}:latest \
+            --severity CRITICAL --ignore-unfixed \
+            --exit-code 1
+
+
+  # ==============================================================
+  # 9. PUSH TO DOCKER HUB
+  # ==============================================================
+  push:
+    name: "🚀 Push to Docker Hub"
+    runs-on: ubuntu-latest
+    needs: trivy-image
+
+    strategy:
+      matrix:
+        component: [backend, frontend]
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: image-${{ matrix.component }}
+
+      - name: Load Image
+        run: docker load -i ${{ matrix.component }}.tar
+
+      - name: Docker Login
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -64,13 +250,13 @@ jobs:
       - name: Tag & Push
         run: |
           docker tag ${{ matrix.component }}:latest \
-          ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:${{ github.sha }}
+          ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
 
-          docker push ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:${{ github.sha }}
+          docker push ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
 
 
   # ==============================================================
-  # 3. UPDATE CD REPO
+  # 10. UPDATE CD REPO
   # ==============================================================
   update-manifest:
     name: 🚀 Update K8s Manifest
@@ -81,9 +267,7 @@ jobs:
       contents: write
 
     steps:
-      # ==========================================================
-      # 1. Checkout CD repo
-      # ==========================================================
+      # Checkout CD repo
       - name: Checkout CD repo
         uses: actions/checkout@v4
         with:
@@ -91,16 +275,12 @@ jobs:
           token: ${{ secrets.CD_REPO_TOKEN }}
           path: cd-repo
 
-      # ==========================================================
-      # 2. Get full SHA
-      # ==========================================================
+      # Get SHA
       - name: Get SHA
         id: sha
         run: echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      # ==========================================================
-      # 3. Update manifest images
-      # ==========================================================
+      # Update images
       - name: Update image tags
         run: |
           IMAGE_TAG=${{ steps.sha.outputs.sha }}
@@ -108,18 +288,12 @@ jobs:
 
           echo "Updating images in $FILE with tag: $IMAGE_TAG"
 
-          # Backend image update
           sed -i "s|image: .*jerney-backend.*|image: ${{ secrets.DOCKERHUB_USER }}/backend:${IMAGE_TAG}|" $FILE
-
-          # Frontend image update
           sed -i "s|image: .*jerney-frontend.*|image: ${{ secrets.DOCKERHUB_USER }}/frontend:${IMAGE_TAG}|" $FILE
 
-          echo "✅ Updated images:"
           grep "image:" $FILE
 
-      # ==========================================================
-      # 4. Commit & Push changes
-      # ==========================================================
+      # Commit & Push
       - name: Commit & push
         run: |
           cd cd-repo
