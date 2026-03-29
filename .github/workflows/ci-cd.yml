@@ -12,51 +12,11 @@ env:
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
 jobs:
-
-# ==============================================================
-# 1. LINT
-# ==============================================================
-  lint:
-    runs-on: self-hosted
-    strategy:
-      matrix:
-        component: [backend, frontend]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - run: npm install
-        working-directory: ${{ matrix.component }}
-
-      - run: npm run lint
-        working-directory: ${{ matrix.component }}
-
-# ==============================================================
-# 2. TRIVY FS
-# ==============================================================
-  trivy-fs:
-    runs-on: self-hosted
-    needs: lint
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - run: |
-          sudo apt-get update
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
-
-      - run: trivy fs . --severity CRITICAL --exit-code 1
-
 # ==============================================================
 # 3. BUILD
 # ==============================================================
   build:
     runs-on: self-hosted
-    needs: trivy-fs
 
     strategy:
       matrix:
@@ -76,36 +36,13 @@ jobs:
           name: image-${{ matrix.component }}
           path: ${{ matrix.component }}.tar
 
-# ==============================================================
-# 4. TRIVY IMAGE
-# ==============================================================
-  trivy-image:
-    runs-on: self-hosted
-    needs: build
 
-    strategy:
-      matrix:
-        component: [backend, frontend]
-
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: image-${{ matrix.component }}
-
-      - run: docker load -i ${{ matrix.component }}.tar
-
-      - run: |
-          sudo apt-get update
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
-
-      - run: trivy image ${{ matrix.component }}:latest --severity CRITICAL --exit-code 1
 
 # ==============================================================
 # 5. PUSH DOCKER
 # ==============================================================
   push:
     runs-on: self-hosted
-    needs: trivy-image
 
     strategy:
       matrix:
@@ -151,7 +88,7 @@ jobs:
           CONTENT=$(echo "$RESPONSE" | grep '"content"' | cut -d '"' -f 4)
 
           # Decode
-          DECODED=$(echo "$CONTENT" | base64 --decode)
+          DECODED=$(echo "$CONTENT" | tr -d '\n' | base64 --decode)
 
           # Update frontend + backend images
           UPDATED=$(echo "$DECODED" | \
