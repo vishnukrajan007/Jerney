@@ -13,9 +13,9 @@ env:
 
 jobs:
 
-# ==============================================================
-# 1. BUILD
-# ==============================================================
+  # ==============================================================
+  # 1. BUILD
+  # ==============================================================
   build:
     runs-on: self-hosted
 
@@ -38,9 +38,9 @@ jobs:
           path: ${{ matrix.component }}.tar
 
 
-# ==============================================================
-# 2. PUSH DOCKER
-# ==============================================================
+  # ==============================================================
+  # 2. PUSH DOCKER
+  # ==============================================================
   push:
     runs-on: self-hosted
     needs: build
@@ -69,11 +69,11 @@ jobs:
           docker push ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:${{ github.sha }}
 
 
-# ==============================================================
-# 3. UPDATE CD REPO
-# ==============================================================
+  # ==============================================================
+  # 3. UPDATE CD REPO
+  # ==============================================================
   update-manifest:
-    name: "🚀 Update K8s Manifest"
+    name: 🚀 Update K8s Manifest
     runs-on: ubuntu-latest
     needs: push
 
@@ -81,44 +81,54 @@ jobs:
       contents: write
 
     steps:
-      # ✅ Checkout CD repo
+      # ==========================================================
+      # 1. Checkout CD repo
+      # ==========================================================
       - name: Checkout CD repo
         uses: actions/checkout@v4
         with:
           repository: vishnukrajan007/Jerney-cd
           token: ${{ secrets.CD_REPO_TOKEN }}
-          path: Jerney-cd
+          path: cd-repo
 
-      # ✅ Get short SHA
-      - name: Get short SHA
+      # ==========================================================
+      # 2. Get full SHA
+      # ==========================================================
+      - name: Get SHA
         id: sha
-        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        run: echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      # ✅ Update YAML
-      - name: Update K8s manifest
+      # ==========================================================
+      # 3. Update manifest images
+      # ==========================================================
+      - name: Update image tags
         run: |
-          IMAGE_TAG=${{ steps.sha.outputs.short }}
-          FILE="Jerney-cd/jerney.yaml"
+          IMAGE_TAG=${{ steps.sha.outputs.sha }}
+          FILE="cd-repo/jerney-cd.yaml"
 
-          # Backend
-          BACKEND_LINE=$(awk '/- name: backend/{found=1} found && /image:/{print NR; exit}' $FILE)
-          sed -i "${BACKEND_LINE}s|.*|          image: ${DOCKERHUB_USER}/backend:${IMAGE_TAG}|" $FILE
+          echo "Updating images in $FILE with tag: $IMAGE_TAG"
 
-          # Frontend
-          FRONTEND_LINE=$(awk '/- name: frontend/{found=1} found && /image:/{print NR; exit}' $FILE)
-          sed -i "${FRONTEND_LINE}s|.*|          image: ${DOCKERHUB_USER}/frontend:${IMAGE_TAG}|" $FILE
+          # Backend image update
+          sed -i "s|image: .*jerney-backend.*|image: ${{ secrets.DOCKERHUB_USER }}/backend:${IMAGE_TAG}|" $FILE
 
-          echo "Updated images:"
-          grep -n "image:" $FILE
+          # Frontend image update
+          sed -i "s|image: .*jerney-frontend.*|image: ${{ secrets.DOCKERHUB_USER }}/frontend:${IMAGE_TAG}|" $FILE
 
-      # ✅ Commit & Push
-      - name: Commit and push
+          echo "✅ Updated images:"
+          grep "image:" $FILE
+
+      # ==========================================================
+      # 4. Commit & Push changes
+      # ==========================================================
+      - name: Commit & push
         run: |
-          cd Jerney-cd
+          cd cd-repo
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add jerney.yaml
-          git diff --cached --quiet || git commit -m "ci: update images to ${{ steps.sha.outputs.short }} [skip ci]"
+          git add jerney-cd.yaml
+
+          git diff --cached --quiet || git commit -m "update: image tag ${{ steps.sha.outputs.sha }} [skip ci]"
 
           git push https://x-access-token:${{ secrets.CD_REPO_TOKEN }}@github.com/vishnukrajan007/Jerney-cd.git
