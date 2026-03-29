@@ -16,9 +16,7 @@ env:
 
 jobs:
 
-# ==============================================================
-# 1. LINT          
-# ==============================================================
+# ================= LINT =================
   lint:
     name: "🔍 Lint Code"
     runs-on: self-hosted
@@ -30,23 +28,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Install dependencies
-        working-directory: ${{ matrix.component }}
+      - working-directory: ${{ matrix.component }}
         run: npm install
 
-      - name: Run ESLint
-        working-directory: ${{ matrix.component }}
+      - working-directory: ${{ matrix.component }}
         run: npm run lint
 
 
-# ==============================================================
-# 2. SCA 
-# ==============================================================
+# ================= SCA =================
   sca:
     name: "🛡️ Dependency Scan"
     runs-on: self-hosted
@@ -59,23 +52,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Install dependencies
-        working-directory: ${{ matrix.component }}
+      - working-directory: ${{ matrix.component }}
         run: npm install
 
-      - name: Run npm audit
-        working-directory: ${{ matrix.component }}
+      - working-directory: ${{ matrix.component }}
         run: npm audit --audit-level=high || true
 
 
-# ==============================================================
-# 3. GITLEAKS
-# ==============================================================
+# ================= GITLEAKS =================
   gitleaks:
     name: "🔐 Secret Scan"
     runs-on: self-hosted
@@ -84,13 +72,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Gitleaks
+        run: |
+          curl -sSfL https://github.com/zricethezav/gitleaks/releases/latest/download/gitleaks_$(uname -s)_$(uname -m).tar.gz -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz
+          sudo mv gitleaks /usr/local/bin/
+
       - name: Run Gitleaks
-        uses: zricethezav/gitleaks-action@v2
+        run: gitleaks detect --source . --exit-code 1
 
 
-# ==============================================================
-# 4. TRIVY FS
-# ==============================================================
+# ================= TRIVY FS =================
   trivy-fs:
     name: "🔬 File Scan"
     runs-on: self-hosted
@@ -99,18 +91,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Trivy
-        run: |
-          sudo apt-get update
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
-
       - name: Run Trivy FS
-        run: trivy fs . --severity CRITICAL --exit-code 1
+        run: |
+          trivy fs . --severity CRITICAL --exit-code 1
 
 
-# ==============================================================
-# 5. SONARQUBE
-# ==============================================================
+# ================= SONARQUBE =================
   sonarqube:
     name: "🔵 SonarQube Analysis"
     runs-on: self-hosted
@@ -119,13 +105,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Install dependencies
-        working-directory: backend
+      - working-directory: backend
         run: npm install
 
       - name: Run SonarQube Scan
@@ -137,34 +121,24 @@ jobs:
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
 
-# ==============================================================
-# 6. NEXUS
-# ==============================================================
+# ================= NEXUS =================
   nexus:
-    name: "📦 Upload Artifact to Nexus"
+    name: "📦 Upload Artifact"
     runs-on: self-hosted
     needs: sonarqube
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        working-directory: backend
-        run: npm install
+      - run: zip -r app.zip backend
 
-      - name: Create artifact
-        run: zip -r app.zip backend
-
-      - name: Upload to Nexus
-        run: |
+      - run: |
           curl -u ${{ secrets.NEXUS_USER }}:${{ secrets.NEXUS_PASS }} \
           --upload-file app.zip \
           http://13.234.226.75:8081/repository/my-artifacts-raw/app.zip
 
 
-# ==============================================================
-# 7. BUILD DOCKER IMAGES
-# ==============================================================
+# ================= BUILD =================
   build:
     name: "🐳 Build Images"
     runs-on: self-hosted
@@ -177,11 +151,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Docker Image
-        run: docker build -t ${{ matrix.component }}:latest ./${{ matrix.component }}
+      - run: docker build -t ${{ matrix.component }}:latest ./${{ matrix.component }}
 
-      - name: Save Image
-        run: docker save ${{ matrix.component }}:latest -o ${{ matrix.component }}.tar
+      - run: docker save ${{ matrix.component }}:latest -o ${{ matrix.component }}.tar
 
       - uses: actions/upload-artifact@v4
         with:
@@ -189,9 +161,7 @@ jobs:
           path: ${{ matrix.component }}.tar
 
 
-# ==============================================================
-# 8. TRIVY IMAGE SCAN
-# ==============================================================
+# ================= TRIVY IMAGE =================
   trivy-image:
     name: "🔬 Image Scan"
     runs-on: self-hosted
@@ -206,24 +176,16 @@ jobs:
         with:
           name: image-${{ matrix.component }}
 
-      - name: Load Image
-        run: docker load -i ${{ matrix.component }}.tar
+      - run: docker load -i ${{ matrix.component }}.tar
 
-      - name: Install Trivy
-        run: |
-          sudo apt-get update
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
-
-      - name: Scan Image
-        run: |
+      - run: |
           trivy image ${{ matrix.component }}:latest \
-            --severity CRITICAL --ignore-unfixed \
+            --severity CRITICAL \
+            --ignore-unfixed \
             --exit-code 1
 
 
-# ==============================================================
-# 9. PUSH TO DOCKER HUB
-# ==============================================================
+# ================= PUSH =================
   push:
     name: "🚀 Push to Docker Hub"
     runs-on: self-hosted
@@ -238,17 +200,14 @@ jobs:
         with:
           name: image-${{ matrix.component }}
 
-      - name: Load Image
-        run: docker load -i ${{ matrix.component }}.tar
+      - run: docker load -i ${{ matrix.component }}.tar
 
-      - name: Docker Login
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Tag & Push
-        run: |
+      - run: |
           docker tag ${{ matrix.component }}:latest \
           ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
 
