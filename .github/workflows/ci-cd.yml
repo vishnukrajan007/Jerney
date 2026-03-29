@@ -1,239 +1,220 @@
 name: Jerney DevSecOps Pipeline
 
 on:
-push:
-branches: ["*"]
-pull_request:
-branches: ["*"]
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: ["*"]
 
 permissions:
-contents: read
+  contents: read
 
 env:
-DOCKER_REGISTRY: docker.io
-DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USER }}
-DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  DOCKER_REGISTRY: docker.io
+  DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USER }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
 jobs:
 
-# ================= LINT =================
+  # ================= LINT =================
+  lint:
+    name: "🔍 Lint Code"
+    runs-on: self-hosted
 
-lint:
-name: "🔍 Lint Code"
-runs-on: self-hosted
+    strategy:
+      matrix:
+        component: [backend, frontend]
 
-```
-strategy:
-  matrix:
-    component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-steps:
-  - uses: actions/checkout@v4
-    with:
-      fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
 
-  - uses: actions/setup-node@v4
-    with:
-      node-version: "20"
-      cache: "npm"
+      - working-directory: ${{ matrix.component }}
+        run: npm install
 
-  - working-directory: ${{ matrix.component }}
-    run: npm install
+      - working-directory: ${{ matrix.component }}
+        run: npm run lint
 
-  - working-directory: ${{ matrix.component }}
-    run: npm run lint
-```
 
-# ================= SCA =================
+  # ================= SCA =================
+  sca:
+    name: "🛡️ Dependency Scan"
+    runs-on: self-hosted
+    needs: lint
 
-sca:
-name: "🛡️ Dependency Scan"
-runs-on: self-hosted
-needs: lint
+    strategy:
+      matrix:
+        component: [backend, frontend]
 
-```
-strategy:
-  matrix:
-    component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
 
-steps:
-  - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
 
-  - uses: actions/setup-node@v4
-    with:
-      node-version: "20"
-      cache: "npm"
+      - working-directory: ${{ matrix.component }}
+        run: npm install
 
-  - working-directory: ${{ matrix.component }}
-    run: npm install
+      - working-directory: ${{ matrix.component }}
+        run: npm audit --audit-level=high
 
-  - working-directory: ${{ matrix.component }}
-    run: npm audit --audit-level=high
-```
 
-# ================= GITLEAKS =================
+  # ================= GITLEAKS =================
+  gitleaks:
+    name: "🔐 Secret Scan"
+    runs-on: self-hosted
+    needs: lint
 
-gitleaks:
-name: "🔐 Secret Scan"
-runs-on: self-hosted
-needs: lint
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-```
-steps:
-  - uses: actions/checkout@v4
-    with:
-      fetch-depth: 0
+      - name: Run Gitleaks
+        uses: zricethezav/gitleaks-action@v2
 
-  - name: Run Gitleaks
-    uses: zricethezav/gitleaks-action@v2
-```
 
-# ================= TRIVY FS =================
+  # ================= TRIVY FS =================
+  trivy-fs:
+    name: "🔬 File Scan"
+    runs-on: self-hosted
+    needs: gitleaks
 
-trivy-fs:
-name: "🔬 File Scan"
-runs-on: self-hosted
-needs: gitleaks
+    steps:
+      - uses: actions/checkout@v4
 
-```
-steps:
-  - uses: actions/checkout@v4
+      - name: Run Trivy FS
+        run: |
+          trivy fs . --severity CRITICAL --exit-code 1
 
-  - name: Run Trivy FS
-    run: |
-      trivy fs . --severity CRITICAL --exit-code 1
-```
 
-# ================= SONARQUBE =================
+  # ================= SONARQUBE =================
+  sonarqube:
+    name: "🔵 SonarQube Analysis"
+    runs-on: self-hosted
+    needs: trivy-fs
 
-sonarqube:
-name: "🔵 SonarQube Analysis"
-runs-on: self-hosted
-needs: trivy-fs
+    steps:
+      - uses: actions/checkout@v4
 
-```
-steps:
-  - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
-  - uses: actions/setup-node@v4
-    with:
-      node-version: "20"
+      - working-directory: backend
+        run: npm install
 
-  - working-directory: backend
-    run: npm install
+      - name: Run SonarQube Scan
+        run: |
+          npx sonar-scanner \
+            -Dsonar.projectKey=jerney \
+            -Dsonar.sources=backend \
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
-  - name: Run SonarQube Scan
-    run: |
-      npx sonar-scanner \
-        -Dsonar.projectKey=jerney \
-        -Dsonar.sources=backend \
-        -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
-        -Dsonar.login=${{ secrets.SONAR_TOKEN }}
-```
 
-# ================= NEXUS =================
+  # ================= NEXUS =================
+  nexus:
+    name: "📦 Upload Artifact"
+    runs-on: self-hosted
+    needs: sonarqube
 
-nexus:
-name: "📦 Upload Artifact"
-runs-on: self-hosted
-needs: sonarqube
+    steps:
+      - uses: actions/checkout@v4
 
-```
-steps:
-  - uses: actions/checkout@v4
+      - run: zip -r app.zip backend
 
-  - run: zip -r app.zip backend
+      - name: Upload to Nexus
+        run: |
+          curl -u ${{ secrets.NEXUS_USER }}:${{ secrets.NEXUS_PASS }} \
+          --upload-file app.zip \
+          http://13.234.226.75:8081/repository/my-artifacts-raw/app.zip
 
-  - name: Upload to Nexus
-    run: |
-      curl -u ${{ secrets.NEXUS_USER }}:${{ secrets.NEXUS_PASS }} \
-      --upload-file app.zip \
-      http://13.234.226.75:8081/repository/my-artifacts-raw/app.zip
-```
 
-# ================= BUILD =================
+  # ================= BUILD =================
+  build:
+    name: "🐳 Build Images"
+    runs-on: self-hosted
+    needs: nexus
 
-build:
-name: "🐳 Build Images"
-runs-on: self-hosted
-needs: nexus
+    strategy:
+      matrix:
+        component: [backend, frontend]
 
-```
-strategy:
-  matrix:
-    component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
 
-steps:
-  - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t ${{ matrix.component }}:latest ./${{ matrix.component }}
 
-  - name: Build Docker image
-    run: docker build -t ${{ matrix.component }}:latest ./${{ matrix.component }}
+      - name: Save image
+        run: docker save ${{ matrix.component }}:latest -o ${{ matrix.component }}.tar
 
-  - name: Save image
-    run: docker save ${{ matrix.component }}:latest -o ${{ matrix.component }}.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.component }}
+          path: ${{ matrix.component }}.tar
 
-  - uses: actions/upload-artifact@v4
-    with:
-      name: image-${{ matrix.component }}
-      path: ${{ matrix.component }}.tar
-```
 
-# ================= TRIVY IMAGE =================
+  # ================= TRIVY IMAGE =================
+  trivy-image:
+    name: "🔬 Image Scan"
+    runs-on: self-hosted
+    needs: build
 
-trivy-image:
-name: "🔬 Image Scan"
-runs-on: self-hosted
-needs: build
+    strategy:
+      matrix:
+        component: [backend, frontend]
 
-```
-strategy:
-  matrix:
-    component: [backend, frontend]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: image-${{ matrix.component }}
 
-steps:
-  - uses: actions/download-artifact@v4
-    with:
-      name: image-${{ matrix.component }}
+      - run: docker load -i ${{ matrix.component }}.tar
 
-  - run: docker load -i ${{ matrix.component }}.tar
+      - name: Scan Docker image
+        run: |
+          trivy image ${{ matrix.component }}:latest \
+            --severity CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1
 
-  - name: Scan Docker image
-    run: |
-      trivy image ${{ matrix.component }}:latest \
-        --severity CRITICAL \
-        --ignore-unfixed \
-        --exit-code 1
-```
 
-# ================= PUSH =================
+  # ================= PUSH =================
+  push:
+    name: "🚀 Push to Docker Hub"
+    runs-on: self-hosted
+    needs: trivy-image
 
-push:
-name: "🚀 Push to Docker Hub"
-runs-on: self-hosted
-needs: trivy-image
+    strategy:
+      matrix:
+        component: [backend, frontend]
 
-```
-strategy:
-  matrix:
-    component: [backend, frontend]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: image-${{ matrix.component }}
 
-steps:
-  - uses: actions/download-artifact@v4
-    with:
-      name: image-${{ matrix.component }}
+      - run: docker load -i ${{ matrix.component }}.tar
 
-  - run: docker load -i ${{ matrix.component }}.tar
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  - name: Login to Docker Hub
-    uses: docker/login-action@v3
-    with:
-      username: ${{ secrets.DOCKERHUB_USER }}
-      password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Tag and Push
+        run: |
+          docker tag ${{ matrix.component }}:latest \
+            ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
 
-  - name: Tag and Push
-    run: |
-      docker tag ${{ matrix.component }}:latest \
-      ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
-
-      docker push ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
-```
+          docker push ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
