@@ -16,9 +16,9 @@ env:
 
 jobs:
 
-  # ==============================================================
-  # 1. LINT
-  # ==============================================================
+# ==============================================================
+# 1. LINT
+# ==============================================================
   lint:
     name: "🔍 Lint Code"
     runs-on: self-hosted
@@ -44,9 +44,9 @@ jobs:
         run: npm run lint
 
 
-  # ==============================================================
-  # 2. SCA
-  # ==============================================================
+# ==============================================================
+# 2. SCA
+# ==============================================================
   sca:
     name: "🛡️ Dependency Scan"
     runs-on: self-hosted
@@ -73,13 +73,28 @@ jobs:
         run: npm audit --audit-level=high || true
 
 
-  # ==============================================================
-  # 3. TRIVY FS
-  # ==============================================================
+# ==============================================================
+# 3. GITLEAKS
+# ==============================================================
+  gitleaks:
+    name: "🔐 Secret Scan"
+    runs-on: self-hosted
+    needs: lint
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Gitleaks
+        uses: zricethezav/gitleaks-action@v2
+
+
+# ==============================================================
+# 4. TRIVY FS
+# ==============================================================
   trivy-fs:
     name: "🔬 File Scan"
     runs-on: self-hosted
-    needs: sca
+    needs: gitleaks
 
     steps:
       - uses: actions/checkout@v4
@@ -87,16 +102,15 @@ jobs:
       - name: Install Trivy
         run: |
           sudo apt-get update
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-          | sudo sh -s -- -b /usr/local/bin
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
 
       - name: Run Trivy FS
         run: trivy fs . --severity CRITICAL --exit-code 1
 
 
-  # ==============================================================
-  # 4. SONARQUBE
-  # ==============================================================
+# ==============================================================
+# 5. SONARQUBE
+# ==============================================================
   sonarqube:
     name: "🔵 SonarQube Analysis"
     runs-on: self-hosted
@@ -123,9 +137,9 @@ jobs:
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
 
-  # ==============================================================
-  # 5. NEXUS
-  # ==============================================================
+# ==============================================================
+# 6. NEXUS
+# ==============================================================
   nexus:
     name: "📦 Upload Artifact to Nexus"
     runs-on: self-hosted
@@ -148,9 +162,9 @@ jobs:
           http://43.205.126.242:8081/repository/my-artifacts-raw/app.zip
 
 
-  # ==============================================================
-  # 6. BUILD DOCKER IMAGES
-  # ==============================================================
+# ==============================================================
+# 7. BUILD DOCKER IMAGES
+# ==============================================================
   build:
     name: "🐳 Build Images"
     runs-on: self-hosted
@@ -175,9 +189,9 @@ jobs:
           path: ${{ matrix.component }}.tar
 
 
-  # ==============================================================
-  # 7. TRIVY IMAGE SCAN
-  # ==============================================================
+# ==============================================================
+# 8. TRIVY IMAGE SCAN
+# ==============================================================
   trivy-image:
     name: "🔬 Image Scan"
     runs-on: self-hosted
@@ -198,20 +212,18 @@ jobs:
       - name: Install Trivy
         run: |
           sudo apt-get update
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-          | sudo sh -s -- -b /usr/local/bin
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
 
       - name: Scan Image
         run: |
           trivy image ${{ matrix.component }}:latest \
-            --severity CRITICAL \
-            --ignore-unfixed \
+            --severity CRITICAL --ignore-unfixed \
             --exit-code 1
 
 
-  # ==============================================================
-  # 8. PUSH TO DOCKER HUB
-  # ==============================================================
+# ==============================================================
+# 9. PUSH TO DOCKER HUB
+# ==============================================================
   push:
     name: "🚀 Push to Docker Hub"
     runs-on: self-hosted
@@ -238,6 +250,6 @@ jobs:
       - name: Tag & Push
         run: |
           docker tag ${{ matrix.component }}:latest \
-            ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
+          ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
 
           docker push ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
