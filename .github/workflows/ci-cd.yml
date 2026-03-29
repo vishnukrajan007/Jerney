@@ -21,7 +21,7 @@ jobs:
   # ==============================================================
   lint:
     name: "🔍 Lint Code"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     strategy:
       matrix:
@@ -49,7 +49,7 @@ jobs:
   # ==============================================================
   sca:
     name: "🛡️ Dependency Scan"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: lint
 
     strategy:
@@ -93,7 +93,7 @@ jobs:
   # ==============================================================
   trivy-fs:
     name: "🔬 File Scan"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: gitleaks
 
     steps:
@@ -113,7 +113,7 @@ jobs:
   # ==============================================================
   sonarqube:
     name: "🔵 SonarQube Analysis"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: trivy-fs
 
     steps:
@@ -142,24 +142,35 @@ jobs:
   # ==============================================================
   nexus:
     name: "📦 Upload Artifact to Nexus"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: sonarqube
 
     steps:
+       # Checkout code
       - uses: actions/checkout@v4
 
+       # Install dependencies (optional but safe)
       - name: Install dependencies
         working-directory: backend
         run: npm install
 
       - name: Create artifact
-        run: zip -r app.zip backend
+        run: |
+          echo "Creating app.zip..."
+          ip -r app.zip backend
+
+          echo "Checking file..."
+          ls -lah app.zip
 
       - name: Upload to Nexus
         run: |
-          curl -u ${{ secrets.NEXUS_USER }}:${{ secrets.NEXUS_PASS }} \
+          echo "Uploading to Nexus..."
+          
+          curl -v -u ${{ secrets.NEXUS_USER }}:${{ secrets.NEXUS_PASS }} \
           --upload-file app.zip \
           http://13.234.226.75:8081/repository/my-articacts-raw/app.zip 
+
+          echo "Upload completed"
 
 
   # ==============================================================
@@ -167,7 +178,7 @@ jobs:
   # ==============================================================
   build:
     name: "🐳 Build Images"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: nexus
 
     strategy:
@@ -194,7 +205,7 @@ jobs:
   # ==============================================================
   trivy-image:
     name: "🔬 Image Scan"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build
 
     strategy:
@@ -226,7 +237,7 @@ jobs:
   # ==============================================================
   push:
     name: "🚀 Push to Docker Hub"
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: trivy-image
 
     strategy:
@@ -260,7 +271,7 @@ jobs:
   # ==============================================================
   update-manifest:
     name: 🚀 Update K8s Manifest
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: push
 
     permissions:
