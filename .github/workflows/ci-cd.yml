@@ -12,8 +12,9 @@ env:
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
 jobs:
+
 # ==============================================================
-# 3. BUILD
+# 1. BUILD
 # ==============================================================
   build:
     runs-on: self-hosted
@@ -37,9 +38,8 @@ jobs:
           path: ${{ matrix.component }}.tar
 
 
-
 # ==============================================================
-# 5. PUSH DOCKER
+# 2. PUSH DOCKER
 # ==============================================================
   push:
     runs-on: self-hosted
@@ -61,52 +61,64 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - run: |
+      - name: Tag & Push
+        run: |
           docker tag ${{ matrix.component }}:latest \
           ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:${{ github.sha }}
 
           docker push ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:${{ github.sha }}
 
+
 # ==============================================================
-# 6. UPDATE CD REPO (API METHOD)
+# 3. UPDATE CD REPO
 # ==============================================================
-  update-cd:
-    runs-on: self-hosted
+  update-manifest:
+    name: "🚀 Update K8s Manifest"
+    runs-on: ubuntu-latest
     needs: push
 
+    permissions:
+      contents: write
+
     steps:
-      - name: Update CD repo without clone
+      # ✅ Checkout CD repo
+      - name: Checkout CD repo
+        uses: actions/checkout@v4
+        with:
+          repository: vishnukrajan007/Jerney-cd
+          token: ${{ secrets.CD_REPO_TOKEN }}
+          path: Jerney-cd
+
+      # ✅ Get short SHA
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      # ✅ Update YAML
+      - name: Update K8s manifest
         run: |
-          FILE_PATH="jerney-cd.yaml"
-          REPO="vishnukrajan007/Jerney-cd"
-          BRANCH="main"
+          IMAGE_TAG=${{ steps.sha.outputs.short }}
+          FILE="Jerney-cd/jerney.yaml"
 
-          # Get file
-          RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.CD_REPO_TOKEN }}" \
-            https://api.github.com/repos/$REPO/contents/$FILE_PATH)
+          # Backend
+          BACKEND_LINE=$(awk '/- name: backend/{found=1} found && /image:/{print NR; exit}' $FILE)
+          sed -i "${BACKEND_LINE}s|.*|          image: ${DOCKERHUB_USER}/backend:${IMAGE_TAG}|" $FILE
 
-          SHA=$(echo "$RESPONSE" | grep '"sha"' | head -1 | cut -d '"' -f 4)
-          CONTENT=$(echo "$RESPONSE" | grep '"content"' | cut -d '"' -f 4)
+          # Frontend
+          FRONTEND_LINE=$(awk '/- name: frontend/{found=1} found && /image:/{print NR; exit}' $FILE)
+          sed -i "${FRONTEND_LINE}s|.*|          image: ${DOCKERHUB_USER}/frontend:${IMAGE_TAG}|" $FILE
 
-          # Decode
-          DECODED=$(echo "$CONTENT" | tr -d '\n' | base64 --decode)
+          echo "Updated images:"
+          grep -n "image:" $FILE
 
-          # Update frontend + backend images
-          UPDATED=$(echo "$DECODED" | \
-            sed "s|image: .*frontend.*|image: ${{ secrets.DOCKERHUB_USER }}/frontend:${{ github.sha }}|g" | \
-            sed "s|image: .*backend.*|image: ${{ secrets.DOCKERHUB_USER }}/backend:${{ github.sha }}|g")
+      # ✅ Commit & Push
+      - name: Commit and push
+        run: |
+          cd Jerney-cd
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Encode
-          ENCODED=$(echo "$UPDATED" | base64 | tr -d '\n')
+          git add jerney.yaml
+          git diff --cached --quiet || git commit -m "ci: update images to ${{ steps.sha.outputs.short }} [skip ci]"
 
-          # Push update
-          curl -X PUT \
-            -H "Authorization: token ${{ secrets.CD_REPO_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"message\": \"Update images to ${{ github.sha }}\",
-              \"content\": \"$ENCODED\",
-              \"sha\": \"$SHA\",
-              \"branch\": \"$BRANCH\"
-            }" \
-            https://api.github.com/repos/$REPO/contents/$FILE_PATH
+          git push https://x-access-token:${{ secrets.CD_REPO_TOKEN }}@github.com/vishnukrajan007/Jerney-cd.git
