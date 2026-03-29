@@ -7,7 +7,7 @@ on:
     branches: ["*"]
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   DOCKER_REGISTRY: docker.io
@@ -148,10 +148,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        working-directory: backend
-        run: npm install
-
       - name: Create artifact
         run: zip -r app.zip backend
 
@@ -250,6 +246,39 @@ jobs:
       - name: Tag & Push
         run: |
           docker tag ${{ matrix.component }}:latest \
-          ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
+          ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:${{ github.sha }}
 
-          docker push ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
+          docker push ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:${{ github.sha }}
+
+
+# ==============================================================
+# 10. UPDATE CD REPO (GITOPS)
+# ==============================================================
+  deploy-cd:
+    name: "🚀 Update CD Repo"
+    runs-on: self-hosted
+    needs: push
+
+    steps:
+      - name: Checkout CD repo
+        uses: actions/checkout@v4
+        with:
+          repository: vishnukrajan007/Jerney-cd
+          token: ${{ secrets.JERNEY_TOKEN }}
+          path: Jerney-cd
+
+      - name: Update image tag
+        run: |
+          cd Jerney-cd
+          sed -i 's|image:.*|image: vishnukrajan007/my-app:${{ github.sha }}|' jerney-cd.yaml
+
+      - name: Commit & Push changes
+        run: |
+          cd Jerney-cd
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          
+          git add .
+          git commit -m "Update image tag to ${{ github.sha }}" || echo "No changes"
+          
+          git push https://x-access-token:${{ secrets.JERNEY_TOKEN }}@github.com/vishnukrajan007/Jerney-cd.git HEAD:main
