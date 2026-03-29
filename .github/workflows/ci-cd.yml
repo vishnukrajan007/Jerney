@@ -159,7 +159,7 @@ jobs:
         run: |
           curl -u ${{ secrets.NEXUS_USER }}:${{ secrets.NEXUS_PASS }} \
           --upload-file app.zip \
-          http://43.205.126.242:8081/repository/my-artifacts-raw/app.zip
+          http://13.234.226.75:8081/repository/my-artifacts-raw/app.zip
 
 
 # ==============================================================
