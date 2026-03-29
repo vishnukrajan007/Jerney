@@ -7,18 +7,19 @@ on:
     branches: ["*"] 
 
 permissions:
-  contents: read
- 
+  contents: write
+
 env:
   DOCKER_REGISTRY: docker.io
   DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USER }}
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
 
-  # ==============================================================
-  # 1. LINT
-  # ==============================================================
+# ==============================================================  
+# 1. LINT  
+# ==============================================================  
   lint:
     name: "🔍 Lint Code"
     runs-on: self-hosted
@@ -44,9 +45,9 @@ jobs:
         run: npm run lint
 
 
-  # ==============================================================
-  # 2. SCA
-  # ==============================================================
+# ==============================================================  
+# 2. SCA  
+# ==============================================================  
   sca:
     name: "🛡️ Dependency Scan"
     runs-on: self-hosted
@@ -73,9 +74,9 @@ jobs:
         run: npm audit --audit-level=high || true
 
 
-  # ==============================================================
-  # 3. GITLEAKS
-  # ==============================================================
+# ==============================================================  
+# 3. GITLEAKS  
+# ==============================================================  
   gitleaks:
     name: "🔐 Secret Scan"
     runs-on: ubuntu-latest
@@ -88,9 +89,9 @@ jobs:
         uses: zricethezav/gitleaks-action@v2
 
 
-  # ==============================================================
-  # 4. TRIVY FS
-  # ==============================================================
+# ==============================================================  
+# 4. TRIVY FS  
+# ==============================================================  
   trivy-fs:
     name: "🔬 File Scan"
     runs-on: self-hosted
@@ -108,9 +109,9 @@ jobs:
         run: trivy fs . --severity CRITICAL --exit-code 1
 
 
-  # ==============================================================
-  # 5. SONARQUBE
-  # ==============================================================
+# ==============================================================  
+# 5. SONARQUBE  
+# ==============================================================  
   sonarqube:
     name: "🔵 SonarQube Analysis"
     runs-on: self-hosted
@@ -137,45 +138,35 @@ jobs:
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
 
-  # ==============================================================
-  # 6. NEXUS
-  # ==============================================================
+# ==============================================================  
+# 6. NEXUS  
+# ==============================================================  
   nexus:
     name: "📦 Upload Artifact to Nexus"
     runs-on: self-hosted
     needs: sonarqube
 
     steps:
-       # Checkout code
       - uses: actions/checkout@v4
 
-       # Install dependencies (optional but safe)
       - name: Install dependencies
         working-directory: backend
         run: npm install
 
       - name: Create artifact
         run: |
-          echo "Creating app.zip..."
           zip -r app.zip backend
-
-          echo "Checking file..."
-          ls -lah app.zip
 
       - name: Upload to Nexus
         run: |
-          echo "Uploading to Nexus..."
-          
           curl -v -u ${{ secrets.NEXUS_USER }}:${{ secrets.NEXUS_PASS }} \
           --upload-file app.zip \
-          http://13.234.226.75:8081/repository/my-articacts-raw/app.zip 
-
-          echo "Upload completed"
+          http://13.234.226.75:8081/repository/my-artifacts-raw/app.zip
 
 
-  # ==============================================================
-  # 7. BUILD DOCKER IMAGES
-  # ==============================================================
+# ==============================================================  
+# 7. BUILD DOCKER IMAGES (SHA TAGGING)  
+# ==============================================================  
   build:
     name: "🐳 Build Images"
     runs-on: self-hosted
@@ -188,11 +179,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Docker Image
-        run: docker build -t ${{ matrix.component }}:latest ./${{ matrix.component }}
+      - name: Build Docker Image (SHA TAG)
+        run: |
+          docker build -t $DOCKERHUB_USER/${{ matrix.component }}:${IMAGE_TAG} ./${{ matrix.component }}
 
       - name: Save Image
-        run: docker save ${{ matrix.component }}:latest -o ${{ matrix.component }}.tar
+        run: |
+          docker save $DOCKERHUB_USER/${{ matrix.component }}:${IMAGE_TAG} -o ${{ matrix.component }}.tar
 
       - uses: actions/upload-artifact@v4
         with:
@@ -200,9 +193,9 @@ jobs:
           path: ${{ matrix.component }}.tar
 
 
-  # ==============================================================
-  # 8. TRIVY IMAGE SCAN
-  # ==============================================================
+# ==============================================================  
+# 8. TRIVY IMAGE SCAN  
+# ==============================================================  
   trivy-image:
     name: "🔬 Image Scan"
     runs-on: self-hosted
@@ -227,14 +220,14 @@ jobs:
 
       - name: Scan Image
         run: |
-          trivy image ${{ matrix.component }}:latest \
+          trivy image $DOCKERHUB_USER/${{ matrix.component }}:${IMAGE_TAG} \
             --severity CRITICAL --ignore-unfixed \
             --exit-code 1
 
 
-  # ==============================================================
-  # 9. PUSH TO DOCKER HUB
-  # ==============================================================
+# ==============================================================  
+# 9. PUSH TO DOCKER HUB  
+# ==============================================================  
   push:
     name: "🚀 Push to Docker Hub"
     runs-on: self-hosted
@@ -258,27 +251,20 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Tag & Push
+      - name: Push Image
         run: |
-          docker tag ${{ matrix.component }}:latest \
-          ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
-
-          docker push ${{ secrets.DOCKERHUB_USER }}/${{ matrix.component }}:latest
+          docker push $DOCKERHUB_USER/${{ matrix.component }}:${IMAGE_TAG}
 
 
-  # ==============================================================
-  # 10. UPDATE CD REPO
-  # ==============================================================
+# ==============================================================  
+# 10. UPDATE CD REPO  
+# ==============================================================  
   update-manifest:
     name: 🚀 Update K8s Manifest
     runs-on: self-hosted
     needs: push
 
-    permissions:
-      contents: write
-
     steps:
-      # Checkout CD repo
       - name: Checkout CD repo
         uses: actions/checkout@v4
         with:
@@ -286,26 +272,14 @@ jobs:
           token: ${{ secrets.CD_REPO_TOKEN }}
           path: cd-repo
 
-      # Get SHA
-      - name: Get SHA
-        id: sha
-        run: echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-
-      # Update images
       - name: Update image tags
         run: |
-          IMAGE_TAG=${{ steps.sha.outputs.sha }}
           FILE="cd-repo/jerney-cd.yaml"
 
-          echo "Updating images in $FILE with tag: $IMAGE_TAG"
+          sed -i "s|image: .*/backend:.*|image: $DOCKERHUB_USER/backend:${IMAGE_TAG}|" $FILE
+          sed -i "s|image: .*/frontend:.*|image: $DOCKERHUB_USER/frontend:${IMAGE_TAG}|" $FILE
 
-          sed -i "s|image: .*/backend:.*|image: ${{ secrets.DOCKERHUB_USER }}/backend:${IMAGE_TAG}|" $FILE
-          sed -i "s|image: .*/frontend:.*|image: ${{ secrets.DOCKERHUB_USER }}/frontend:${IMAGE_TAG}|" $FILE
-
-          grep "image:" $FILE
-
-      # Commit & Push
-      - name: Commit & push
+      - name: Commit & Push
         run: |
           cd cd-repo
 
@@ -314,6 +288,6 @@ jobs:
 
           git add jerney-cd.yaml
 
-          git diff --cached --quiet || git commit -m "update: image tag ${{ steps.sha.outputs.sha }} [skip ci]"
+          git diff --cached --quiet || git commit -m "update image tag ${IMAGE_TAG} [skip ci]"
 
           git push https://x-access-token:${{ secrets.CD_REPO_TOKEN }}@github.com/vishnukrajan007/Jerney-cd.git
