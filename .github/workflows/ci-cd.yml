@@ -8,7 +8,7 @@ on:
 
 permissions:
   contents: read
-
+ 
 env:
   DOCKER_REGISTRY: docker.io
   DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USER }}
