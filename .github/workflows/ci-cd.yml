@@ -157,7 +157,7 @@ jobs:
       - name: Create artifact
         run: |
           echo "Creating app.zip..."
-          ip -r app.zip backend
+          zip -r app.zip backend
 
           echo "Checking file..."
           ls -lah app.zip
