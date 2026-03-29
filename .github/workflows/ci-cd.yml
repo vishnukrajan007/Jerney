@@ -64,7 +64,7 @@ jobs:
 
 
 # ================= GITLEAKS =================
-  gitleaks:
+ gitleaks:
     name: "🔐 Secret Scan"
     runs-on: self-hosted
     needs: lint
@@ -72,16 +72,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Gitleaks
-        run: 
-              curl -sSfL https://github.com/zricethezav/gitleaks/releases/latest/download/gitleaks_8.24.3_linux_x64.tar.gz -o gitleaks.tar.gz
-
-              tar -xzf gitleaks.tar.gz
-              sudo mv gitleaks /usr/local/bin/
-
       - name: Run Gitleaks
-        run: gitleaks detect --source . --exit-code 1
-
+        uses: zricethezav/gitleaks-action@v2
 
 # ================= TRIVY FS =================
   trivy-fs:
